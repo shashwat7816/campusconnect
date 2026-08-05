@@ -1,47 +1,100 @@
+name: CI/CD Pipeline
+
 on:
-  push: { branches: [master] }
-  pull_request: { branches: [master] }
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
-  id-token: write   # required for OIDC -- no secret stored anywhere
+  id-token: write
   contents: read
 
 jobs:
   test-backend:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
+
       - run: pip install -r backend/requirements.txt pytest
+
       - run: python -m pytest tests -v
         working-directory: backend
 
   test-frontend:
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: frontend } }
+
+    defaults:
+      run:
+        working-directory: frontend
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with:
+          node-version: "20"
+
       - run: npm ci
+
       - run: npm run lint
+
       - run: npm run build
-build-and-scan:
-  needs: [test-backend, test-frontend]
-  strategy:
-    matrix:
-      include:
-        - { service: api, context: backend, dockerfile: backend/Dockerfile }
-        - { service: worker, context: backend, dockerfile: backend/Dockerfile.worker }
-        - { service: frontend, context: frontend, dockerfile: frontend/Dockerfile, build-args: NEXT_PUBLIC_API_URL=/api }
-  steps:
-    - uses: azure/login@v2
-      with: { client-id: ${{ vars.AZURE_CLIENT_ID }}, tenant-id: ${{ vars.AZURE_TENANT_ID }}, subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }} }
-    - run: az acr login --name ${{ vars.ACR_NAME }}
-    - uses: docker/build-push-action@v6
-      with: { push: false, load: true, tags: "...campusconnect/${{ matrix.service }}:${{ github.sha }}" }
-    - uses: aquasecurity/trivy-action@master   # THE GATE -- runs BEFORE any push
-      with: { severity: CRITICAL, ignore-unfixed: true, exit-code: "1" }
-    - if: github.event_name == 'push'
-      run: docker push ...campusconnect/${{ matrix.service }}:${{ github.sha }}
+
+  build-and-scan:
+    runs-on: ubuntu-latest
+
+    needs:
+      - test-backend
+      - test-frontend
+
+    strategy:
+      matrix:
+        include:
+          - service: api
+            context: backend
+            dockerfile: backend/Dockerfile
+
+          - service: worker
+            context: backend
+            dockerfile: backend/Dockerfile.worker
+
+          - service: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+            build-args: NEXT_PUBLIC_API_URL=/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build-args }}
+          push: false
+          load: true
+          tags: ${{ vars.ACR_NAME }}.azurecr.io/campusconnect/${{ matrix.service }}:${{ github.sha }}
+
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ vars.ACR_NAME }}.azurecr.io/campusconnect/${{ matrix.service }}:${{ github.sha }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - if: github.event_name == 'push'
+        run: docker push ${{ vars.ACR_NAME }}.azurecr.io/campusconnect/${{ matrix.service }}:${{ github.sha }}
