@@ -16,7 +16,7 @@ function ThreadDetailContent() {
   }
 
   useEffect(() => {
-    load();
+   void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 

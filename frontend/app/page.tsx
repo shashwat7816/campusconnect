@@ -16,7 +16,7 @@ function FeedContent() {
   }
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   async function submitPost(e: React.FormEvent) {

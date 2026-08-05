@@ -26,7 +26,7 @@ function ProjectsContent() {
   }
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   async function submitProject(e: React.FormEvent) {
